@@ -1,0 +1,14 @@
+language: go
+go:
+  - 1.13.x
+  - master
+
+os:
+  - linux
+  - windows
+  - osx
+
+dist: bionic
+sudo: false
+install: true
+script: go test -v ./...
