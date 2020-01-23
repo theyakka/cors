@@ -5,6 +5,9 @@ CORS follows the  Cross Origin Resource Sharing W3 specification as described [h
 CORS requires Go `1.13` (or higher) as it uses the error functionality that was introduced in Go `1.13`.
 
 [![Go Version](https://img.shields.io/badge/Go-1.13+-lightgrey.svg)](https://golang.org/)
+![All Tests](https://github.com/theyakka/cors/workflows/All%20Tests/badge.svg)
+[![Build Status](https://travis-ci.org/theyakka/cors.svg?branch=master)](https://travis-ci.org/theyakka/cors)
+
 
 # Installing
 
