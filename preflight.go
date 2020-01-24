@@ -13,69 +13,81 @@ import (
 )
 
 const (
-	// HeaderKeyOrigin is the http header for the request origin
-	HeaderKeyOrigin string = "Origin"
-	// HeaderKeyAccCtlAllowOrigin is the http header designating the CORS response allowed origin
-	HeaderKeyAccCtlAllowOrigin = "Access-Control-Allow-Origin"
+	// HeaderKeyReqOrigin is the http header for the request origin
+	HeaderKeyReqOrigin string = "Origin"
 	// HeaderKeyAccCtlReqMethod is the http header designating the CORS response allowed method
 	HeaderKeyAccCtlReqMethod = "Access-Control-Request-Method"
 	// HeaderKeyAccCtlReqHeaders is the http header designating the CORS response allowed headers
 	HeaderKeyAccCtlReqHeaders = "Access-Control-Request-Headers"
-	// HeaderKeyAccCtlMaxAge is the http header designating the CORS response maximum age
-	HeaderKeyAccCtlMaxAge = "Access-Control-Max-Age"
-	// HeaderKeyAccCtlAllowCreds is the http header designating whether the CORS response allows
+
+	// HeaderKeyAccCtlResAllowOrigin is the http header designating the CORS response allowed origin
+	HeaderKeyAccCtlResAllowOrigin = "Access-Control-Allow-Origin"
+	// HeaderKeyAccCtlResAllowMethods is the http header designating the CORS response allowed methods
+	HeaderKeyAccCtlResAllowMethods = "Access-Control-Allow-Methods"
+	// HeaderKeyAccCtlResAllowHeaders is the http header designating the CORS response allowed headers
+	HeaderKeyAccCtlResAllowHeaders = "Access-Control-Allow-Headers"
+	// HeaderKeyAccCtlResExposeHeaders indicates which headers can be exposed as part of the response
+	HeaderKeyAccCtlResExposeHeaders = "Access-Control-Expose-Headers"
+	// HeaderKeyAccResCtlMaxAge is the http header designating the CORS response maximum age
+	HeaderKeyAccResCtlMaxAge = "Access-Control-Max-Age"
+	// HeaderKeyAccCtlResAllowCreds is the http header designating whether the CORS response allows
 	// cookies / credentials
-	HeaderKeyAccCtlAllowCreds = "Access-Control-Allow-Credentials"
+	HeaderKeyAccCtlResAllowCreds = "Access-Control-Allow-Credentials"
 )
 
-type PreflightHandler func(response PreflightResponse, w http.ResponseWriter, r *http.Request)
+// PreflightHandlerFunc will be excuted when the preflight has completed. If it succeeds,
+// the value of error will be nil. If it fails, error will contain a ValidationError that
+// decribes the reason for the failure.
+type PreflightHandlerFunc func(w http.ResponseWriter, r *http.Request, error *ValidationError)
 
-type PreflightResponse struct {
-	Code     int
-	HasError bool
-}
-
-func (c CORS) DoPreflight(w http.ResponseWriter, r *http.Request, handler PreflightHandler) {
+// ValidatePreflight will execute the preflight flow for a request. Once the validation has
+// fully executed, the handler will be executed so that you can check the response.
+func (c CORS) ValidatePreflight(w http.ResponseWriter, r *http.Request, handler PreflightHandlerFunc) {
 	headers := w.Header()
+	// if the http method is not OPTIONS then we're going to fail because the preflight
+	// should be delivered via OPTIONS. We return an error code indicating that it
+	// wasn't options so that you can forward on the request if you choose.
 	if r.Method != http.MethodOptions {
-		handler(preflightError(PreflightErrMethodInvalid), w, r)
+		handler(w, r, preflightError(PreflightErrMethodInvalid))
 		return
 	}
-	// get the origin
-	origin := r.Header.Get(HeaderKeyOrigin)
-	// ensure that we don't poison any caches or force caches to return the wrong value
-	headers.Add("Vary", HeaderKeyOrigin)
+
+	// ensure that we don't poison any cache or force a cache to return the wrong value
+	headers.Add("Vary", HeaderKeyReqOrigin)
 	headers.Add("Vary", HeaderKeyAccCtlReqMethod)
 	headers.Add("Vary", HeaderKeyAccCtlReqHeaders)
 
 	// check the origin
 	if c.areAllOriginsAllowed {
 		// all origins are allowed, set header
-		headers.Set(HeaderKeyAccCtlAllowOrigin, "*")
-	} else if c.IsOriginAllowed(origin) {
-		// passed origin is allowed, set header
-		headers.Set(HeaderKeyAccCtlAllowOrigin, origin)
+		headers.Set(HeaderKeyAccCtlResAllowOrigin, "*")
 	} else {
-		// the origin wasn't whitelisted
-		handler(preflightError(PreflightErrOriginNotAllowed), w, r)
-		return
+		origin := r.Header.Get(HeaderKeyReqOrigin)
+		if c.IsOriginAllowed(origin) {
+			// passed origin is allowed, set header
+			headers.Set(HeaderKeyAccCtlResAllowOrigin, origin)
+		} else {
+			// the origin wasn't whitelisted
+			handler(w, r, preflightError(PreflightErrOriginNotAllowed))
+			return
+		}
 	}
 
 	// check the requested method
 	method := r.Header.Get(HeaderKeyAccCtlReqMethod)
 	if method == "" {
 		// the method header was missing
-		handler(preflightError(PreflightErrMethodMissing), w, r)
+		handler(w, r, preflightError(PreflightErrMethodMissing))
 		return
 	}
 	// when we compare the method we should convert to uppercase before doing the check
 	upperMethod := strings.ToUpper(method)
 	if c.IsMethodAllowed(upperMethod) {
 		// we only return the method that was requested here.
-		headers.Set(HeaderKeyAccCtlReqMethod, upperMethod)
+		headers.Set(HeaderKeyAccCtlResAllowMethods, upperMethod)
 	} else {
 		// the method wasn't whitelisted
-		handler(preflightError(PreflightErrMethodNotAllowed), w, r)
+		handler(w, r, preflightError(PreflightErrMethodNotAllowed))
 		return
 	}
 	// if all headers are allowed, then we should skip the check because we will need to parse the
@@ -85,27 +97,43 @@ func (c CORS) DoPreflight(w http.ResponseWriter, r *http.Request, handler Prefli
 		headersString := r.Header.Get(HeaderKeyAccCtlReqHeaders)
 		cleanedHeaders := cleanAllowedHeaderValue(headersString)
 		if c.AreHeadersAllowed(cleanedHeaders) {
-			headers.Set(HeaderKeyAccCtlReqHeaders, strings.Join(cleanedHeaders, ", "))
+			headers.Set(HeaderKeyAccCtlResAllowHeaders, strings.Join(cleanedHeaders, ", "))
 		} else {
 			// one or more of the headers weren't whitelisted
-			handler(preflightError(PreflightErrHeadersNotAllowed), w, r)
+			handler(w, r, preflightError(PreflightErrHeadersNotAllowed))
 			return
 		}
 	}
 
+	if len(c.exposedHeaders) > 0 {
+
+	}
+
 	// pass through the max age header
 	if c.options.MaxAge > 0 {
-		headers.Set(HeaderKeyAccCtlMaxAge, strconv.Itoa(c.options.MaxAge))
+		headers.Set(HeaderKeyAccResCtlMaxAge, strconv.Itoa(c.options.MaxAge))
 	}
 
 	// pass through the allow credentials header
 	if c.options.AllowCredentials {
-		headers.Set(HeaderKeyAccCtlAllowCreds, "true")
+		headers.Set(HeaderKeyAccCtlResAllowCreds, "true")
 	}
 }
 
-func preflightError(code int) PreflightResponse {
-	return PreflightResponse{Code: code, HasError: true}
+func preflightError(code int) *ValidationError {
+	return preflightErrorWithSource(code, nil)
+}
+
+func preflightErrorWithSource(code int, originalError error) *ValidationError {
+	message := codedErrorMessages[code]
+	if message == "" {
+		message = "please check code + original error for details"
+	}
+	return &ValidationError{
+		Code:          code,
+		Message:       message,
+		OriginalError: originalError,
+	}
 }
 
 // IsOriginAllowed does a check to see if an origin value is whitelisted according to the
