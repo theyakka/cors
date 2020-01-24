@@ -38,7 +38,7 @@ func OptionsAllowAll() *Options {
 	return &Options{
 		AllowedOrigins:   AllowAllOrigins,
 		AllowedMethods:   AllowAllMethods,
-		AllowedHeaders:   DefaultAllowedHeaders,
+		AllowedHeaders:   AllowAllHeaders,
 		ExposedHeaders:   DefaultExposedHeaders,
 		AllowCredentials: false,
 		MaxAge:           0,
@@ -83,7 +83,9 @@ func (o *Options) applyAllowedOrigins(c *CORS) {
 			}
 			origin, originErr := NewOrigin(strings.ToLower(originString))
 			if originErr != nil {
-				log.Println(originErr)
+				// TODO - should surface this error directly? seems pretty fatal.
+				log.Println("could not add origin:", originString)
+				log.Fatal(originErr)
 			}
 			allowedOrigins = append(allowedOrigins, origin)
 		}

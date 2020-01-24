@@ -19,7 +19,28 @@ go get -u github.com/theyakka/cors
 
 # Getting started
 
-TBD
+To use validate a preflight request, you would add something like the 
+following to an `http.Handler` that is registered to handle `OPTIONS`
+calls globally (or however you are handling preflights):
+
+```go
+o := cors.Options{
+    AllowedOrigins: []string{"http*://*.theyakka.com", "http*://theyakka.com"},
+    AllowedHeaders: cors.DefaultHeadersWith("Authorization"),
+}
+c, err := o.NewCORS()
+if err != nil {
+    // do something with the error
+}
+
+c.ValidatePreflight(w, r, func(w http.ResponseWriter, r *http.Request, error *cors.ValidationError) {
+    if error != nil {
+        // preflight failed - return an error
+        return
+    }
+    // return success
+})
+```
 
 See the [API documentation](http://godoc.org/github.com/theyakka/cors) for further details.
 

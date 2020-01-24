@@ -118,6 +118,8 @@ func (c CORS) ValidatePreflight(w http.ResponseWriter, r *http.Request, handler 
 	if c.options.AllowCredentials {
 		headers.Set(HeaderKeyAccCtlResAllowCreds, "true")
 	}
+
+	handler(w, r, nil)
 }
 
 func preflightError(code int) *ValidationError {

@@ -36,10 +36,5 @@ type CORS struct {
 // AllowAll creates a new CORS instance that allows all origins, methods, and
 // headers.
 func AllowAll() (*CORS, error) {
-	options := Options{
-		AllowedOrigins: AllowAllOrigins,
-		AllowedMethods: AllowAllMethods,
-		AllowedHeaders: AllowAllHeaders,
-	}
-	return options.NewCORS()
+	return OptionsAllowAll().NewCORS()
 }
