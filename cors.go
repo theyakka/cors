@@ -15,7 +15,7 @@ type CORS struct {
 	// allowedOrigins is the cleaned list of origins we will allow. If allowedOrigins is
 	// empty, then it will be assumed all origins will be allowed (areAllOriginsAllowed will
 	// be true).
-	allowedOrigins []*Origin
+	allowedOrigins []*Match
 	// areAllOriginsAllowed will be true if the AllowedOrigins value in the attached Options
 	// instance contained the '*' origin or if AllowedOrigins was empty.
 	areAllOriginsAllowed bool

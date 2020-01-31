@@ -7,15 +7,15 @@
 package cors
 
 import (
-	"log"
 	"net/http"
 	"strings"
 )
 
 // Options represents the configurable elements of the CORS validation process.
 type Options struct {
-	// The list of origins you want to whitelist.
-	AllowedOrigins []string
+	// AllowedOrigins should contain the list of origins you would like to whitelist.
+	// Origin definitions can be exact match origins, or contain wildcard components.
+	AllowedOrigins []*Match
 	// The list of methods you want to whitelist.
 	AllowedMethods []string
 	// The list of headers you want to whitelist.
@@ -66,31 +66,23 @@ func (o *Options) NewCORS() (*CORS, error) {
 
 // applyAllowedOrigins checks for the "*" value and will
 func (o *Options) applyAllowedOrigins(c *CORS) {
-	var allowedOrigins []*Origin
 	if o.AllowedOrigins == nil || len(o.AllowedOrigins) == 0 {
 		// no allowed origins so we're going to assume that you want to allow everything
 		// (vs nothing .. as that would be weird)
 		c.areAllOriginsAllowed = true
 		c.allowedOrigins = nil
 	} else {
-		for _, originString := range o.AllowedOrigins {
-			if originString == "*" {
+		for _, origin := range o.AllowedOrigins {
+			if origin.Matches("*") {
 				// if we're allowing all origins then it's irrelevant to keep the old list
 				// so we will just stop here
 				c.areAllOriginsAllowed = true
 				c.allowedOrigins = nil
 				return
 			}
-			origin, originErr := NewOrigin(strings.ToLower(originString))
-			if originErr != nil {
-				// TODO - should surface this error directly? seems pretty fatal.
-				log.Println("could not add origin:", originString)
-				log.Fatal(originErr)
-			}
-			allowedOrigins = append(allowedOrigins, origin)
+			c.allowedOrigins = append(c.allowedOrigins, origin)
 		}
 		c.areAllOriginsAllowed = false
-		c.allowedOrigins = allowedOrigins
 	}
 }
 
@@ -102,11 +94,9 @@ func (o *Options) applyAllowedMethods(c *CORS) {
 	} else {
 		// convert any provided value to uppercase so that, later, when we do our checks
 		// we don't waste time converting them every time.
-		var allowedMethods []string
 		for _, method := range o.AllowedMethods {
-			allowedMethods = append(allowedMethods, strings.ToUpper(method))
+			c.allowedMethods = append(c.allowedMethods, strings.ToUpper(method))
 		}
-		c.allowedMethods = allowedMethods
 	}
 }
 
@@ -115,17 +105,15 @@ func (o *Options) applyAllowedHeaders(c *CORS) {
 		c.areAllHeadersAllowed = false
 		c.allowedHeaders = DefaultAllowedHeaders
 	} else {
-		var allowedHeaders []string
 		for _, header := range o.AllowedHeaders {
 			if header == "*" {
 				c.areAllHeadersAllowed = true
 				c.allowedHeaders = nil
 				return
 			}
-			allowedHeaders = append(allowedHeaders, http.CanonicalHeaderKey(header))
+			c.allowedHeaders = append(c.allowedHeaders, http.CanonicalHeaderKey(header))
 		}
 		c.areAllHeadersAllowed = false
-		c.allowedHeaders = allowedHeaders
 	}
 }
 
@@ -133,11 +121,9 @@ func (o *Options) applyExposedHeaders(c *CORS) {
 	if len(o.ExposedHeaders) == 0 {
 		c.exposedHeaders = DefaultExposedHeaders
 	} else {
-		var exposedHeaders []string
 		for _, header := range o.ExposedHeaders {
-			exposedHeaders = append(exposedHeaders, http.CanonicalHeaderKey(header))
+			c.exposedHeaders = append(c.exposedHeaders, http.CanonicalHeaderKey(header))
 		}
-		c.exposedHeaders = exposedHeaders
 	}
 }
 
@@ -156,7 +142,7 @@ func DefaultExposeHeadersWith(headers ...string) []string {
 }
 
 // AllowAllOrigins is a slice containing just the wildcard ("*") origin.
-var AllowAllOrigins = []string{"*"}
+var AllowAllOrigins = []*Match{EM("*")}
 
 // SpecSimpleMethods contains the HTTP methods that the CORS specification deems acceptable
 // methods for "simple" requests. We use these methods as the default if value is provided
@@ -184,7 +170,7 @@ var AllowAllHeaders = []string{"*"}
 // all CORS preflights / requests. It is used as the default list if you don't specify
 // anything.
 var DefaultAllowedHeaders = []string{
-	"Accept", "Content-Type", "Origin", "X-Requested-With",
+	"Accept", "Content-Type", "Match", "X-Requested-With",
 }
 
 // DefaultExposedHeaders is a slice containing the CORS-safelisted headers that

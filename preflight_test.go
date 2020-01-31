@@ -15,7 +15,9 @@ import (
 
 func TestValidPreflight(t *testing.T) {
 	o := cors.Options{
-		AllowedOrigins: []string{"http*://*.theyakka.com", "http*://theyakka.com"},
+		AllowedOrigins: []*cors.Match{
+			cors.WC(`https?://.*\.theyakka\.com`), cors.WC(`https?://theyakka\.com`),
+		},
 		AllowedHeaders: cors.DefaultHeadersWith("Authorization"),
 	}
 	c, err := o.NewCORS()
@@ -36,7 +38,9 @@ func TestValidPreflight(t *testing.T) {
 
 func TestValidPreflightResponse(t *testing.T) {
 	o := cors.Options{
-		AllowedOrigins: []string{"http*://*.theyakka.com", "http*://theyakka.com"},
+		AllowedOrigins: []*cors.Match{
+			cors.WC(`https?://.*\.theyakka\.com`), cors.WC(`https?://theyakka\.com`),
+		},
 		AllowedHeaders: cors.DefaultHeadersWith("Authorization"),
 	}
 	c, err := o.NewCORS()
@@ -64,7 +68,9 @@ func TestValidPreflightResponse(t *testing.T) {
 
 func TestInvalidOriginPreflight(t *testing.T) {
 	o := cors.Options{
-		AllowedOrigins: []string{"http*://*.theyakka.com", "http*://theyakka.com"},
+		AllowedOrigins: []*cors.Match{
+			cors.WC(`https?://.*\.theyakka\.com`), cors.WC(`https?://theyakka\.com`),
+		},
 		AllowedHeaders: cors.DefaultHeadersWith("Authorization"),
 	}
 	c, err := o.NewCORS()
@@ -85,6 +91,102 @@ func TestInvalidOriginPreflight(t *testing.T) {
 			return
 		}
 	})
+}
+
+func TestValidOriginPreflightWithPort(t *testing.T) {
+	o := cors.Options{
+		AllowedOrigins: []*cors.Match{
+			cors.WC(`https?://localhost:8[0-9]{3}`),
+		},
+		AllowedHeaders: cors.DefaultHeadersWith("Authorization"),
+	}
+	c, err := o.NewCORS()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	req := buildPreflightRequest("http://localhost:8022")
+	w := httptest.NewRecorder()
+	c.ValidatePreflight(w, req, func(w http.ResponseWriter, r *http.Request, error *cors.ValidationError) {
+		if error != nil {
+			t.Error("expected no error to have occurred")
+			return
+		}
+	})
+}
+
+func BenchmarkExactPreflight(b *testing.B) {
+	o := cors.Options{
+		AllowedOrigins: []*cors.Match{
+			cors.EM(`https://theyakka.com`),
+		},
+		AllowedHeaders: cors.DefaultHeadersWith("Authorization"),
+	}
+	c, err := o.NewCORS()
+	if err != nil {
+		b.Error(err)
+		return
+	}
+
+	req := buildPreflightRequest("https://theyakka.com")
+	w := httptest.NewRecorder()
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		c.ValidatePreflight(w, req, func(w http.ResponseWriter, r *http.Request, error *cors.ValidationError) {
+		})
+	}
+}
+
+func BenchmarkWildcardPreflight(b *testing.B) {
+	o := cors.Options{
+		AllowedOrigins: []*cors.Match{
+			cors.WC(`https?://.*\.theyakka\.com`), cors.WC(`https?://theyakka\.com`),
+		},
+		AllowedHeaders: cors.DefaultHeadersWith("Authorization"),
+	}
+	c, err := o.NewCORS()
+	if err != nil {
+		b.Error(err)
+		return
+	}
+
+	req := buildPreflightRequest("https://theyakka.com")
+	w := httptest.NewRecorder()
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		c.ValidatePreflight(w, req, func(w http.ResponseWriter, r *http.Request, error *cors.ValidationError) {
+		})
+	}
+}
+
+func BenchmarkWildcardPortPreflight(b *testing.B) {
+	o := cors.Options{
+		AllowedOrigins: []*cors.Match{
+			cors.WC(`https?://localhost:8[0-9]{3}`),
+		},
+		AllowedHeaders: cors.DefaultHeadersWith("Authorization"),
+	}
+	c, err := o.NewCORS()
+	if err != nil {
+		b.Error(err)
+		return
+	}
+
+	req := buildPreflightRequest("http://localhost:8022")
+	w := httptest.NewRecorder()
+	handler := fakeHandler(c)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		handler.ServeHTTP(w, req)
+	}
 }
 
 func TestAllowAllPreflight(t *testing.T) {
@@ -111,4 +213,12 @@ func buildPreflightRequest(url string) *http.Request {
 	req.Header.Set(cors.HeaderKeyAccCtlReqHeaders, "Authorization, Content-Type")
 	req.Header.Set("content-type", "application/json")
 	return req
+}
+
+func fakeHandler(c *cors.CORS) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.ValidatePreflight(w, r, func(w http.ResponseWriter, r *http.Request, error *cors.ValidationError) {
+			_, _ = w.Write([]byte("ok"))
+		})
+	})
 }

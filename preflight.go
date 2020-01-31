@@ -14,14 +14,14 @@ import (
 
 const (
 	// HeaderKeyReqOrigin is the http header for the request origin
-	HeaderKeyReqOrigin string = "Origin"
+	HeaderKeyReqOrigin string = "Match"
 	// HeaderKeyAccCtlReqMethod is the http header designating the CORS response allowed method
 	HeaderKeyAccCtlReqMethod = "Access-Control-Request-Method"
 	// HeaderKeyAccCtlReqHeaders is the http header designating the CORS response allowed headers
 	HeaderKeyAccCtlReqHeaders = "Access-Control-Request-Headers"
 
 	// HeaderKeyAccCtlResAllowOrigin is the http header designating the CORS response allowed origin
-	HeaderKeyAccCtlResAllowOrigin = "Access-Control-Allow-Origin"
+	HeaderKeyAccCtlResAllowOrigin = "Access-Control-Allow-Match"
 	// HeaderKeyAccCtlResAllowMethods is the http header designating the CORS response allowed methods
 	HeaderKeyAccCtlResAllowMethods = "Access-Control-Allow-Methods"
 	// HeaderKeyAccCtlResAllowHeaders is the http header designating the CORS response allowed headers
@@ -42,7 +42,7 @@ type PreflightHandlerFunc func(w http.ResponseWriter, r *http.Request, error *Va
 
 // ValidatePreflight will execute the preflight flow for a request. Once the validation has
 // fully executed, the handler will be executed so that you can check the response.
-func (c CORS) ValidatePreflight(w http.ResponseWriter, r *http.Request, handler PreflightHandlerFunc) {
+func (c *CORS) ValidatePreflight(w http.ResponseWriter, r *http.Request, handler PreflightHandlerFunc) {
 	headers := w.Header()
 	// if the http method is not OPTIONS then we're going to fail because the preflight
 	// should be delivered via OPTIONS. We return an error code indicating that it
@@ -95,13 +95,14 @@ func (c CORS) ValidatePreflight(w http.ResponseWriter, r *http.Request, handler 
 	if !c.areAllHeadersAllowed {
 		// parse the header string and then check to see if the headers have been whitelisted
 		headersString := r.Header.Get(HeaderKeyAccCtlReqHeaders)
-		cleanedHeaders := cleanAllowedHeaderValue(headersString)
-		if c.AreHeadersAllowed(cleanedHeaders) {
-			headers.Set(HeaderKeyAccCtlResAllowHeaders, strings.Join(cleanedHeaders, ", "))
-		} else {
+		cleanedHeaders := parseHeaderList(headersString)
+		if !c.AreHeadersAllowed(cleanedHeaders) {
 			// one or more of the headers weren't whitelisted
 			handler(w, r, preflightError(PreflightErrHeadersNotAllowed))
 			return
+		}
+		if len(cleanedHeaders) > 0 {
+			headers.Set(HeaderKeyAccCtlResAllowHeaders, strings.Join(cleanedHeaders, ", "))
 		}
 	}
 
@@ -140,7 +141,7 @@ func preflightErrorWithSource(code int, originalError error) *ValidationError {
 
 // IsOriginAllowed does a check to see if an origin value is whitelisted according to the
 // attached AllowedOrigins values.
-func (c CORS) IsOriginAllowed(checkOrigin string) bool {
+func (c *CORS) IsOriginAllowed(checkOrigin string) bool {
 	// check first to see if all origins are allowed so we can get the heck out of here
 	if c.areAllOriginsAllowed {
 		return true
@@ -148,7 +149,7 @@ func (c CORS) IsOriginAllowed(checkOrigin string) bool {
 	checkOrigin = strings.ToLower(checkOrigin)
 	// check each of the allowed origin values to see if we have a match
 	for _, origin := range c.allowedOrigins {
-		if origin.AllowsFor(checkOrigin) {
+		if origin.Matches(checkOrigin) {
 			// allowed
 			return true
 		}
@@ -159,7 +160,7 @@ func (c CORS) IsOriginAllowed(checkOrigin string) bool {
 
 // IsMethodAllowed will return true if the provided method value is in the list of
 // whitelisted HTTP methods or it is the OPTIONS http method (which is always allowed).
-func (c CORS) IsMethodAllowed(checkMethod string) bool {
+func (c *CORS) IsMethodAllowed(checkMethod string) bool {
 	// always allow OPTIONS because it will be used for preflight
 	if checkMethod == http.MethodOptions {
 		return true
@@ -174,7 +175,7 @@ func (c CORS) IsMethodAllowed(checkMethod string) bool {
 	return false
 }
 
-func (c CORS) AreHeadersAllowed(headers []string) bool {
+func (c *CORS) AreHeadersAllowed(headers []string) bool {
 	for _, passedHeader := range headers {
 		isAllowed := false
 		for _, allowedHeader := range c.allowedHeaders {
@@ -192,11 +193,60 @@ func (c CORS) AreHeadersAllowed(headers []string) bool {
 }
 
 func cleanAllowedHeaderValue(value string) []string {
-	var headers []string
-	splitValues := strings.Split(value, ",")
-	for _, splitValue := range splitValues {
-		trimmed := strings.TrimLeft(splitValue, " ")
-		headers = append(headers, http.CanonicalHeaderKey(trimmed))
+	//var headers []string
+	//splitValues := strings.Split(value, ",")
+	//for _, splitValue := range splitValues {
+	//	trimmed := strings.TrimLeft(splitValue, " ")
+	//	headers = append(headers, http.CanonicalHeaderKey(trimmed))
+	//}
+	//return headers
+	return []string{}
+}
+
+const toLower = 'a' - 'A'
+
+// parseHeaderList tokenize + normalize a string containing a list of headers
+func parseHeaderList(headerList string) []string {
+	l := len(headerList)
+	h := make([]byte, 0, l)
+	upper := true
+	// Estimate the number headers in order to allocate the right splice size
+	t := 0
+	for i := 0; i < l; i++ {
+		if headerList[i] == ',' {
+			t++
+		}
+	}
+	headers := make([]string, 0, t)
+	for i := 0; i < l; i++ {
+		b := headerList[i]
+		switch {
+		case b >= 'a' && b <= 'z':
+			if upper {
+				h = append(h, b-toLower)
+			} else {
+				h = append(h, b)
+			}
+		case b >= 'A' && b <= 'Z':
+			if !upper {
+				h = append(h, b+toLower)
+			} else {
+				h = append(h, b)
+			}
+		case b == '-' || b == '_' || (b >= '0' && b <= '9'):
+			h = append(h, b)
+		}
+
+		if b == ' ' || b == ',' || i == l-1 {
+			if len(h) > 0 {
+				// Flush the found header
+				headers = append(headers, string(h))
+				h = h[:0]
+				upper = true
+			}
+		} else {
+			upper = b == '-' || b == '_'
+		}
 	}
 	return headers
 }
